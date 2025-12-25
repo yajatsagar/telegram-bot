@@ -6,9 +6,9 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, Callb
 
 # ================= CONFIG =================
 
-BOT_TOKEN = "8431658256:AAFpuYSGZf8LklVtGJgxO1_n9buXzkDPXwc"
-API_KEY = "nuvy"
-API_URL = "https://aetherosint.site/cutieee/api.php"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_KEY = os.getenv("API_KEY")
+API_URL = os.getenv("API_URL")
 
 ALLOWED_GROUP_ID = -1002178825948
 
