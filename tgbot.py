@@ -2,6 +2,7 @@ import requests
 import time
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+import json
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 
 # ================= CONFIG =================
@@ -21,10 +22,24 @@ GROUP_INVITE_LINK = "https://t.me/+ocpvos9fMTgzZWQ1"
 DAILY_LIMIT = 10
 
 # =========================================
+
+
+USAGE_FILE = "usage.json"
+
+def load_usage():
+    if os.path.exists(USAGE_FILE):
+        with open(USAGE_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_usage():
+    with open(USAGE_FILE, "w") as f:
+        json.dump(user_usage, f)
+
 if not BOT_TOKEN or not API_KEY or not API_URL:
     raise RuntimeError("Missing environment variables. Check BOT_TOKEN, API_KEY, API_URL")
 
-user_usage = {}
+user_usage = load_usage()
 verified_users = set()
 
 
@@ -177,7 +192,7 @@ async def num(update: Update, context: ContextTypes.DEFAULT_TYPE):
     os.remove(filename)
 
     user_usage[user_id]["count"] += 1
-
+    save_usage()
 
 async def verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
