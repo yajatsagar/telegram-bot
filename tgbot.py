@@ -21,6 +21,8 @@ GROUP_INVITE_LINK = "https://t.me/+ocpvos9fMTgzZWQ1"
 DAILY_LIMIT = 10
 
 # =========================================
+if not BOT_TOKEN or not API_KEY or not API_URL:
+    raise RuntimeError("Missing environment variables. Check BOT_TOKEN, API_KEY, API_URL")
 
 user_usage = {}
 verified_users = set()
