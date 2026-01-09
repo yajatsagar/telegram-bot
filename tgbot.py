@@ -1,15 +1,20 @@
+import logging
 import requests
 import time
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
-import json
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
+
+# Configure logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+)
 
 # ================= CONFIG =================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-API_KEY = os.getenv("API_KEY")
-API_URL = os.getenv("API_URL")
+BOT_TOKEN = "8431658256:AAFpuYSGZf8LklVtGJgxO1_n9buXzkDPXwc"
+API_KEY = "nuvy"
+API_URL = "https://aetherosint.site/cutieee/api.php"
 
 ALLOWED_GROUP_ID = -1002178825948
 
@@ -23,23 +28,7 @@ DAILY_LIMIT = 10
 
 # =========================================
 
-
-USAGE_FILE = "usage.json"
-
-def load_usage():
-    if os.path.exists(USAGE_FILE):
-        with open(USAGE_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-def save_usage():
-    with open(USAGE_FILE, "w") as f:
-        json.dump(user_usage, f)
-
-if not BOT_TOKEN or not API_KEY or not API_URL:
-    raise RuntimeError("Missing environment variables. Check BOT_TOKEN, API_KEY, API_URL")
-
-user_usage = load_usage()
+user_usage = {}
 verified_users = set()
 
 
@@ -76,15 +65,42 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📱 To lookup number information, use:\n"
         "`/num <mobile_number>`\n\n",
         parse_mode="Markdown")
+    
+FAMPAY_API = "https://chumt-hvb29uo8d-okvaipro-svgs-projects.vercel.app/verify"
+
+def check_fampay(number: str):
+    try:
+        r = requests.get(
+            FAMPAY_API,
+            params={"query": number},
+            timeout=10
+        )
+        r.raise_for_status()
+        return r.text.lower()
+    except:
+        return None
 
 
 async def num(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     user_id = update.effective_user.id
+    
+    logging.info(f"[/num] User {user_id} called /num with args: {context.args}")
 
     # 🔐 JOIN CHECK (CHANNEL + PRIVATE + GROUP)
-    in_public = await is_user_in_public_channel(user_id, context)
-    in_group = await is_user_in_group(user_id, context)
+    try:
+        in_public = await is_user_in_public_channel(user_id, context)
+        logging.info(f"[/num] User {user_id} in public channel: {in_public}")
+    except Exception as e:
+        logging.exception(f"[/num] Error checking public channel for user {user_id}")
+        in_public = False
+    
+    try:
+        in_group = await is_user_in_group(user_id, context)
+        logging.info(f"[/num] User {user_id} in group: {in_group}")
+    except Exception as e:
+        logging.exception(f"[/num] Error checking group membership for user {user_id}")
+        in_group = False
 
     if not in_public or not in_group:
         keyboard = InlineKeyboardMarkup(
@@ -101,6 +117,7 @@ async def num(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                       url=GROUP_INVITE_LINK)
              ]])
 
+        logging.info(f"[/num] Access denied for user {user_id} (in_public={in_public}, in_group={in_group})")
         await update.message.reply_text(
             "🚫 *Access Denied*\n\n"
             "To use this bot, you must join:\n"
@@ -113,34 +130,55 @@ async def num(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not check_limit(user_id):
+        logging.info(f"[/num] Daily limit reached for user {user_id}")
         await update.message.reply_text("🚫 *Daily limit reached (10/day).*",
                                         parse_mode="Markdown")
         return
 
     if len(context.args) != 1:
+        logging.info(f"[/num] Invalid args for user {user_id}: {context.args}")
         await update.message.reply_text("❌ Usage: /num <number>")
         return
 
     number = context.args[0]
+    logging.info(f"[/num] Looking up number: {number}")
 
-    r = requests.get(API_URL,
-                     params={
-                         "key": API_KEY,
-                         "type": "mobile",
-                         "term": number
-                     })
     try:
+        r = requests.get(API_URL,
+                         params={
+                             "key": API_KEY,
+                             "type": "mobile",
+                             "term": number
+                         },
+                         timeout=10)
+        logging.info(f"[/num] API response status: {r.status_code}")
         j = r.json()
-    except:
+        logging.info(f"[/num] API response type: {type(j).__name__}, content: {j}")
+    except Exception as e:
+        logging.exception(f"[/num] API request failed for number {number}")
         await update.message.reply_text("⚠️ API error.")
         return
 
-    if j.get("status") != "found":
-        await update.message.reply_text("❌ No data found.")
+    # Handle both list and dict responses
+    if isinstance(j, list):
+        if not j or len(j) == 0:
+            logging.info(f"[/num] Empty list response for number {number}")
+            await update.message.reply_text("❌ No data found.")
+            return
+        data = j[0]
+        logging.info(f"[/num] Using first element from list: {data}")
+    elif isinstance(j, dict):
+        if j.get("status") != "found":
+            logging.info(f"[/num] No data found for number {number}, status: {j.get('status')}")
+            await update.message.reply_text("❌ No data found.")
+            return
+        raw_data = j.get("data")
+        data = raw_data[0] if isinstance(raw_data, list) else raw_data
+        logging.info(f"[/num] Parsed data from dict: {data}")
+    else:
+        logging.error(f"[/num] Unexpected API response type: {type(j).__name__}")
+        await update.message.reply_text("⚠️ Unexpected API response format.")
         return
-
-    raw_data = j.get("data")
-    data = raw_data[0] if isinstance(raw_data, list) else raw_data
 
     text = f"""
 ════════════════════════════════════
@@ -168,31 +206,38 @@ async def num(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ════════════════════════════════════
 """
 
-    filename = f"{number}.txt"
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(text)
+    try:
+        filename = f"{number}.txt"
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(text)
+        logging.info(f"[/num] Created file: {filename}")
 
-    keyboard = InlineKeyboardMarkup(
-        [[
-            InlineKeyboardButton("🔗 Official Channel 🔗",
-                                 url=PUBLIC_CHANNEL_LINK)
-        ],
-         [
-             InlineKeyboardButton(
-                 "⭐ Add me to your Group ⭐",
-                 url="https://t.me/darkreaverbot?startgroup=true")
-         ]])
+        keyboard = InlineKeyboardMarkup(
+            [[
+                InlineKeyboardButton("🔗 Official Channel 🔗",
+                                     url=PUBLIC_CHANNEL_LINK)
+            ],
+             [
+                 InlineKeyboardButton(
+                     "⭐ Add me to your Group ⭐",
+                     url="https://t.me/darkreaverbot?startgroup=true")
+             ]])
 
-    with open(filename, "rb") as file:
-        await update.message.reply_document(document=file,
-                                            caption="📱 *Mobile Lookup Result*",
-                                            parse_mode="Markdown",
-                                            reply_markup=keyboard)
+        with open(filename, "rb") as file:
+            await update.message.reply_document(document=file,
+                                                caption="📱 *Mobile Lookup Result*",
+                                                parse_mode="Markdown",
+                                                reply_markup=keyboard)
+        logging.info(f"[/num] Sent document to user {user_id}")
 
-    os.remove(filename)
+        os.remove(filename)
+        user_usage[user_id]["count"] += 1
+        logging.info(f"[/num] Completed lookup for user {user_id}, usage count: {user_usage[user_id]['count']}")
+    except Exception as e:
+        logging.exception(f"[/num] Error sending document to user {user_id}")
+        await update.message.reply_text(f"❌ Error sending result: {str(e)}")
 
-    user_usage[user_id]["count"] += 1
-    save_usage()
+
 
 async def verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -203,10 +248,33 @@ async def verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer("✅ Verified! Now send /num again.", show_alert=True)
 
 
+async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await update.message.reply_text("Pong!")
+    except Exception:
+        logging.exception("Failed to reply to /ping")
+
+
+async def log_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Log incoming updates for debugging; don't auto-reply to avoid spam
+    logging.info("Incoming update from %s: %s", update.effective_user.id if update.effective_user else None, update)
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logging.exception("Exception while handling update: %s", update)
+
+
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("num", num))
+app.add_handler(CommandHandler("ping", ping))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_messages))
 app.add_handler(CallbackQueryHandler(verify_callback, pattern="verify_me"))
+app.add_error_handler(error_handler)
 
 print("🤖 Bot is running...")
-app.run_polling()
+try:
+    # Use drop_pending_updates to clear webhooks/pending updates and start polling
+    app.run_polling(drop_pending_updates=True)
+except Exception:
+    logging.exception("Bot terminated with an exception")
